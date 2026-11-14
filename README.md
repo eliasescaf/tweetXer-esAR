@@ -1,107 +1,122 @@
-# tweetXer – eXterminate your Tweets
+# TweetXer (Fork en Español + Reintentos)
 
-You can use [this script](https://raw.githubusercontent.com/lucahammer/tweetXer/refs/heads/main/tweetXer.js) to delete all your Tweets. Even if they don't show up on your profile. But you need your Data Export for it to work.
-Because this automates the deletion, it may get your account banned. Not a bad outcome.
+Fork en español de [tweetXer](https://github.com/lucahammer/tweetXer/) para eliminar tus tweets de forma gratuita desde la consola del navegador o mediante Tampermonkey.
 
-## Translations
+## Cambios en este fork
 
-[Portuguese (Brazil)](https://github.com/arielgmelo/tweetXer-ptbr)
+* **Interfaz y logs 100% en español:** Todos los mensajes de estado, progreso y errores en consola están traducidos.
+* **Sistema de reintentos y backoff ante límites (429) o errores de red:** A diferencia de la versión original que puede frenarse o perder el hilo ante un bloqueo temporal de la API interna de X, este fork incorpora un ciclo de tolerancia a fallos (`sendRequestWithRetry`):
+  * **3 intentos por petición:** Ante un error `429` (Rate Limit), timeout (15s) o fallo de red, realiza hasta **2 reintentos** escalonados (esperando ~10s y ~30s con *jitter* aleatorio para evitar patrones robóticos).
+  * **Pausa larga automática (15 minutos):** Si se agotan los 3 intentos (porque se llenó la ventana de peticiones), el script no aborta; entra en una pausa de **15 minutos** (900 segundos) con cuenta regresiva en pantalla y luego retoma automáticamente. Esto permite aprovechar cada reinicio de ventana de X para meter tandas adicionales (~200 borrados extra por ciclo) sin intervención manual.
+  * **Lectura de cabeceras `x-rate-limit-remaining`:** Si la API avisa que queda 0 cuota disponible, espera exactamente hasta el timestamp `x-rate-limit-reset` antes de mandar la siguiente petición.
 
-## Video tutorial
+---
 
-[![Youtube player preview showing a screenrecording: Left half is a firefox with twitter.com open and and open console. Right side is a code editor with bullet points and a person looking at the viewer with animated blue birds flying around their head.](https://img.youtube.com/vi/jB1-z6LbX5w/0.jpg)](https://www.youtube.com/watch?v=jB1-z6LbX5w)
+## Cómo usarlo
 
-English: [youtube.com/watch?v=jB1-z6LbX5w](https://www.youtube.com/watch?v=jB1-z6LbX5w)
+### 1. Descargá tus datos de X / Twitter
+1. Entrá a **Configuración y privacidad** → **Tu cuenta** → **Descarga un archivo con tus datos**.
+2. Confirmá tu contraseña y solicitá el archivo (X suele tardar unas 24 horas en habilitar la descarga).
+3. Descomprimí el `.zip` descargado. Dentro de la carpeta `data/` vas a encontrar el archivo que necesita la herramienta: **`tweets.js`** (también es compatible con `tweet-headers.js`, que es una versión más liviana solo con IDs y fechas; alcanza con cargar uno solo).
 
-German: [youtube.com/watch?v=HmQ7_ZgVNxg](https://www.youtube.com/watch?v=HmQ7_ZgVNxg)
+### 2. Ejecutá el script en tu navegador
+1. Iniciá sesión en [x.com](https://x.com) desde tu computadora.
+2. Abrí las herramientas de desarrollador (**DevTools**) presionando `F12` o `Ctrl + Shift + I` (en Mac: `Cmd + Option + I`).
+3. Entrá a la pestaña **Consola (Console)**.
+   * *Nota:* Si es la primera vez que pegás código, Chrome/Firefox te van a pedir que escribas `allow pasting` (o `permitir pegar`) y presiones `Enter` por seguridad.
+4. Copiá todo el contenido del archivo `tweetXer.js`, pegalo en la consola y presioná `Enter`.
+5. Va a aparecer una barra celeste en la parte superior de la página. Hacé clic en **Seleccionar archivo** y cargá tu archivo `tweets.js` (o el archivo filtrado).
 
-# Usage
-0.  [Request](https://x.com/settings/your_twitter_data/data) (takes several days) and download your Data Export and unzip it
-1.  Log into your Twitter account
-2.  Open the browser console (F12 or cmd+option+i)
-3.  Paste the [whole script](https://raw.githubusercontent.com/lucahammer/tweetXer/main/tweetXer.js) into the console and press enter
-4.  A light blue bar appears at the top of the window
-5.  Use the file picker to select your tweet-headers.js or tweets.js file
-6.  Wait for all your Tweets to vanish (about 5-10 Tweets per second)
+*(Alternativamente, podés instalar la extensión **Tampermonkey** y agregar el código como un nuevo Userscript).*
 
-If the process is interrupted at any time, you can use the advanced options to enter how many Tweets have been deleted in the previous run to not start at zero again. The script will try to automatically detect if it was run before by calculating the difference between Tweets in the file and the Tweet count on the profile. If there is a difference it will try to automatically skip that amount (+5% buffer). If you want it to start from the beginning, open 'Advanced options' and enter 1 instead of 0. It will then skip exactly one Tweet and not try to calculate an amount.
+### 3. Opciones avanzadas y consejos
+* **Saltear tweets (`skipCount`):** Si frenaste el proceso y lo retomás otro día, podés indicar cuántos tweets ya borraste para que no intente procesarlos de nuevo.
+* **Borrado lento (sin archivo):** Disponible en *Opciones avanzadas*. Borra directamente desde el DOM de tu perfil sin necesitar el `.zip` de datos, aunque es más lento y menos confiable.
+* **Cuidado de la cuenta:** Para evitar que X te pida resolver un captcha de verificación por actividad automatizada, se recomienda borrar en bloques de **2.000 a 3.000 tweets por día** en lugar de dejarlo corriendo 24 horas seguidas.
 
-# Alternative to copy & paste: userscript
+---
 
-Instead of copy-pasting the script, you can install it as a userscript: [greasyfork.org/en/scripts/476062-tweetxer](https://greasyfork.org/en/scripts/476062-tweetxer) (works with eg. [Violentmonkey](https://addons.mozilla.org/firefox/addon/violentmonkey/), [FireMonkey](https://addons.mozilla.org/firefox/addon/firemonkey/) or [tampermonkey](https://addons.mozilla.org/firefox/addon/tampermonkey/) browser addon)
+## Filtrar tweets por fecha antes de borrar (Opcional)
 
-The userscript works on smartphones as well.
+Si no querés borrar toda tu cuenta y preferís eliminar únicamente tweets antiguos (por ejemplo, anteriores al **1 de enero de 2025**), podés preprocesar el archivo `tweets.js` antes de cargarlo en TweetXer. El ejemplo está planteado para esa fecha, pero podés modificarla libremente.
 
-## Android
+### Pasos (en Linux)
 
-1. Install [Firefox Mobile](https://www.mozilla.org/firefox/browsers/mobile/)
-2. Install the [Tampermonkey addon](https://addons.mozilla.org/firefox/addon/tampermonkey/)
-3. Install the [script from greasyfork](https://greasyfork.org/en/scripts/476062-tweetxer)
-4. Open X com and the blue bar should show up. You may need to uninstall the X-App before.
+1. **Ubicá el archivo**
+   Dentro de la carpeta descomprimida de tu backup de X/Twitter, ubicá:
+   ```text
+   data/tweets.js
+   ```
+   *(A veces se llama `tweet.js` o viene dividido en `tweets-part0.js`, `tweets-part1.js`, etc.)*
 
-[Video tutorial for Android](https://www.youtube.com/watch?v=Z-MeTaRq6xM)
+2. **Creá el script de filtrado**
+   Abrí una terminal en la carpeta donde está el archivo y creá el script:
+   ```bash
+   nano filtrar_tweets.py
+   ```
+   Pegá el siguiente código:
+   ```python
+   #!/usr/bin/env python3
+   import json
+   from datetime import datetime
+   from pathlib import Path
 
-## iOS (iPhone/iPad)
+   # === CONFIGURACIÓN ===
+   INPUT_FILE = "tweets.js"              # Cambiá si se llama diferente
+   OUTPUT_FILE = "tweets_antes_2025.js"  # Cambiá si se llama diferente
+   CUTOFF = datetime(2025, 1, 1)         # Formato (AAAA, M, D) sin ceros a la izquierda. Borra tweets anteriores a esta fecha.
 
-1. Install the safari extension [Userscripts](https://apps.apple.com/app/userscripts/id1463298887)
-2. Enable userscripts in Safari
-3. Add the TweetXer userscript: New remote https://update.greasyfork.org/scripts/476062/TweetXer.user.js
-4. Visit X com
-5. Allow the extension Userscripts to access X com
+   def parse_twitter_date(date_str):
+       # Formato típico: "Tue May 05 09:23:11 +0000 2024"
+       return datetime.strptime(date_str, "%a %b %d %H:%M:%S %z %Y").replace(tzinfo=None)
 
-# How it works
+   def main():
+       path = Path(INPUT_FILE)
+       if not path.exists():
+           print(f"No encontré {INPUT_FILE}")
+           return
 
-Never use something like this from an untrusted source. The script intercepts requests from your browser to Twitter and replaces the Tweet-IDs
-with IDs from your tweets.js file. This allows it to access the old Tweets and delete them.
+       text = path.read_text(encoding="utf-8")
 
-XHR interception inspired by [github.com/ttodua/Tamper-Request-Javascript-Tool](https://github.com/ttodua/Tamper-Request-Javascript-Tool)
+       # Buscamos el comienzo del array JSON
+       start = text.find("[")
+       if start == -1:
+           print("No se encontró el array de tweets")
+           return
 
-Faster deletion inspired by [github.com/Lyfhael/DeleteTweets](https://github.com/Lyfhael/DeleteTweets)
+       # Cargamos solo la parte JSON
+       data = json.loads(text[start:])
 
-# Bonus: Export your bookmarks
+       filtered = []
+       for item in data:
+           tweet = item.get("tweet", item)  # a veces viene directo
+           created = tweet.get("created_at")
+           if not created:
+               continue
+           try:
+               dt = parse_twitter_date(created)
+               if dt < CUTOFF:
+                   filtered.append(item)
+           except Exception as e:
+               print(f"Error con fecha {created}: {e}")
 
-Because bookmarks aren't included in the Twitter data export, there is a button under "Advanced options" to export them.
+       # Guardamos en el mismo formato que espera tweetXer
+       with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+           f.write("window.YTD.tweets.part0 = ")
+           json.dump(filtered, f, ensure_ascii=False, indent=2)
 
-# Bonus: Tweet deletion without data export
+       print(f"Listo. Original: {len(data)} tweets")
+       print(f"Filtrados: {len(filtered)} tweets")
+       print(f"Archivo generado: {OUTPUT_FILE}")
 
-If for some reason you can't use your data export or it missed some Tweets, you can use slow mode under "Advanced options". Be warned, it is very slow because it has to load the Tweets on your profile first to delete them and there are various request limits for that.
+   if __name__ == "__main__":
+       main()
+   ```
 
-# Bonus: Delete Direct Messages
+3. **Ejecutá el script**
+   ```bash
+   python3 filtrar_tweets.py
+   ```
 
-To delete DMs, you select the direct-message-header.js file instead of the tweet-headers.js file. Once it's done, reload the page, paste TweetXer into the console again and select the direct-message-group-headers.js file to remove message groups. If the process gets interrupted for whatever reason, you can enter how many messages where deleted before under "Advanced options" before selcting the file.
-
-[According to former engineers](https://bsky.app/profile/triketora.com/post/3lcbmqzo4uk25), DMs are removed from the server if all sides remove them from their inbox.
-
-# Bonus: Unfollow everyone
-
-Under "Advanced options" you can automatically unfollow everyone. You may need to rerun with some time in between because of rate limits.
-
-# Known issues and solutions
-
-- I can't paste the script.
-
-  Your browser tries to protect you from pasting some random script you found. Type "allow pasting" (Firefox) or "allow pasting" (Chrome) and hit enter to confirm that you know what you are doing.
-
-- X Corp doesn't send me my data export.
-
-Try requesting it through their [Privacy Form](https://help.x.com/en/forms/privacy/request-account-info/me).
-
-- Not all Tweets got removed.
-
-Check if the ID of the remaining Tweet is in your data export. The script can only remove what's in the file. There is a option to automatically remove remaining Tweets under "Advanced options" but it is very slow. If there are many Tweets, re-run the script. Maybe request a new export.
-
-- No Tweets are visible on the profile, but Tweet count shows there are still Tweets left.
-
-In most cases those are Retweets from Tweets from accounts that got deactivated or banned. Sometimes the Tweets reappear once the accounts come back, sometimes they don't. There is nothing you can do.
-
-- Likes aren't removed.
-
-Only the last few hundred can be be removed. Even by hand. There is nothing you can do other than deleting your whole account. Or reliking Tweets to unlike them afterwards which will probably get your account locked for spamming.
-
-- Browser crashes
-
-  This happens more often with Chrome and Chrome-based browsers. Especially when removing more than 15 k Tweets. Closing the browser console while it runs seems to reduce the crashes.
-
-- It worked and you are thankful.
-
-Awesome. Share the script on whatever platform you are using now to give others the option to delete their Tweets. Support me to keep creating things like this: [buymeacoffee.com/lucahammer](https://www.buymeacoffee.com/lucahammer)
+4. **Usá el archivo filtrado**
+   Abrí X en tu navegador, ejecutá `tweetXer.js` en la consola y seleccioná **`tweets_antes_2025.js`** en lugar del archivo original.
