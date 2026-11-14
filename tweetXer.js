@@ -15,18 +15,18 @@
 // ==/UserScript==
 
 (async function () {
-  if (window.TweetsXer && window.TweetsXer.enEjecucion) {
+  if (window.TweetsXer && window.TweetsXer.isRunning) {
     console.log("TweetXer ya está cargado en esta página.");
     return;
   }
 
-  const INTENTOS_MAX = 3;
-  const REINTENTOS_MAX = INTENTOS_MAX - 1;
-  const PAUSA_LARGA_MS = 900 * 1000;
-  const ESPERAS_MS = [10000, 30000];
+  const MAX_ATTEMPTS = 3;
+  const MAX_RETRIES = MAX_ATTEMPTS - 1;
+  const LONG_PAUSE_MS = 900 * 1000;
+  const RETRY_DELAYS_MS = [10000, 30000];
 
   let TweetsXer = {
-    enEjecucion: true,
+    isRunning: true,
     TweetCount: 0,
     dId: "exportUpload",
     tIds: [],
@@ -42,8 +42,8 @@
     deleteConvoURL:
       "/i/api/1.1/dm/conversation/USER_ID-CONVERSATION_ID/delete.json",
     deleteDMsOneByOne: false,
-    queryIdBorrado: "VaenaVgh5q5ih7kvyVjgtg",
-    queryIdFavorito: "ZYKSe-w7KEslx3JhSIk5LA",
+    deleteQueryId: "VaenaVgh5q5ih7kvyVjgtg",
+    unfavQueryId: "ZYKSe-w7KEslx3JhSIk5LA",
     username: "",
     action: "",
     bookmarksURL: "/i/api/graphql/L7vvM2UluPgWOW4GDvWyvw/Bookmarks?",
@@ -238,7 +238,7 @@
                 <h2 class="${h2Class}" id="tweetsXer_title">TweetXer (consola)</h2>
                 <p id="info">Esperando carga de perfil...</p>
                 <p id="start">
-                    <input type="file" value="" id="${this.dId}_file"  />
+                    <input type="file" value="" id="${this.dId}_file" />
                     <a href="#" id="toggleAdvanced">Opciones avanzadas</a>
                 <div id="advanced" style="display:none">
                     <label for="skipCount">Cuántos Tweets saltear antes de seleccionar archivo.</label>
@@ -252,7 +252,7 @@
                     <p><a id="removeTweetXer" href="#">Quitar TweetXer</a></p>
                 </div>
             </div>
-                `;
+            `;
       document.body.insertBefore(div, document.body.firstChild);
       document
         .getElementById("toggleAdvanced")
@@ -276,7 +276,9 @@
 
     async sendRequestWithRetry(url, body) {
       while (true) {
-        for (let intento = 0; intento < INTENTOS_MAX; intento++) {
+        let waitedByHeader = false;
+
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
           try {
             const response = await fetch(url, {
               headers: {
@@ -319,68 +321,90 @@
             }
 
             if (response.status == 429) {
+              const resetHeader = response.headers.get("x-rate-limit-reset");
+              let sleeptime = resetHeader
+                ? parseInt(resetHeader) - Math.floor(Date.now() / 1000)
+                : 0;
+
+              if (sleeptime > 0) {
+                console.warn(
+                  `429 con x-rate-limit-reset. Esperando ${sleeptime}s.`,
+                );
+                while (sleeptime > 0) {
+                  TweetsXer.updateInfo(
+                    `Límite de peticiones alcanzado. Esperando ${sleeptime}s. ${TweetsXer.dCount} borrados.`,
+                  );
+                  await TweetsXer.sleep(1000);
+                  sleeptime =
+                    parseInt(resetHeader) - Math.floor(Date.now() / 1000);
+                }
+                waitedByHeader = true;
+                break;
+              }
               console.warn(
-                `429: límite de peticiones alcanzado. Intento ${intento + 1}/${INTENTOS_MAX}.`,
+                `429: límite de peticiones alcanzado (sin reset header). Intento ${attempt + 1}/${MAX_ATTEMPTS}.`,
               );
             } else {
               console.warn(
-                `Error ${response.status}. Intento ${intento + 1}/${INTENTOS_MAX}.`,
+                `Error ${response.status}. Intento ${attempt + 1}/${MAX_ATTEMPTS}.`,
                 response,
               );
             }
 
-            if (intento === INTENTOS_MAX - 1) break;
+            if (attempt === MAX_ATTEMPTS - 1) break;
 
-            const esperaMs =
-              ESPERAS_MS[intento] + Math.floor(Math.random() * 1000);
-            const finReintento = Date.now() + esperaMs;
-            let s = Math.ceil((finReintento - Date.now()) / 1000);
-            while (s > 0) {
-              const motivo =
+            const delayMs =
+              RETRY_DELAYS_MS[attempt] + Math.floor(Math.random() * 1000);
+            const retryEnd = Date.now() + delayMs;
+            let secondsLeft = Math.ceil((retryEnd - Date.now()) / 1000);
+            while (secondsLeft > 0) {
+              const reason =
                 response.status == 429 ? "429" : `error ${response.status}`;
               TweetsXer.updateInfo(
-                `${motivo}. Reintento ${intento + 1}/${REINTENTOS_MAX} en ${s}s. ${TweetsXer.dCount} borrados.`,
+                `${reason}. Reintento ${attempt + 1}/${MAX_RETRIES} en ${secondsLeft}s. ${TweetsXer.dCount} borrados.`,
               );
               await TweetsXer.sleep(1000);
-              s = Math.ceil((finReintento - Date.now()) / 1000);
+              secondsLeft = Math.ceil((retryEnd - Date.now()) / 1000);
             }
             continue;
           } catch (error) {
             const isTimeout =
               error.name === "AbortError" || error.name === "TimeoutError";
             console.warn(
-              `${isTimeout ? "Timeout" : "Error de red"}. Intento ${intento + 1}/${INTENTOS_MAX}:`,
+              `${isTimeout ? "Timeout" : "Error de red"}. Intento ${attempt + 1}/${MAX_ATTEMPTS}:`,
               error.message,
             );
 
-            if (intento === INTENTOS_MAX - 1) break;
+            if (attempt === MAX_ATTEMPTS - 1) break;
 
-            const esperaMs =
-              ESPERAS_MS[intento] + Math.floor(Math.random() * 1000);
-            const finReintento = Date.now() + esperaMs;
-            let s = Math.ceil((finReintento - Date.now()) / 1000);
-            while (s > 0) {
+            const delayMs =
+              RETRY_DELAYS_MS[attempt] + Math.floor(Math.random() * 1000);
+            const retryEnd = Date.now() + delayMs;
+            let secondsLeft = Math.ceil((retryEnd - Date.now()) / 1000);
+            while (secondsLeft > 0) {
               TweetsXer.updateInfo(
-                `${isTimeout ? "Timeout" : "Error de red"}. Reintento ${intento + 1}/${REINTENTOS_MAX} en ${s}s. ${TweetsXer.dCount} borrados.`,
+                `${isTimeout ? "Timeout" : "Error de red"}. Reintento ${attempt + 1}/${MAX_RETRIES} en ${secondsLeft}s. ${TweetsXer.dCount} borrados.`,
               );
               await TweetsXer.sleep(1000);
-              s = Math.ceil((finReintento - Date.now()) / 1000);
+              secondsLeft = Math.ceil((retryEnd - Date.now()) / 1000);
             }
             continue;
           }
         }
 
-        console.log(
-          `Se agotaron el intento y los ${REINTENTOS_MAX} reintentos. Pausando ${PAUSA_LARGA_MS / 60000} minutos antes de volver a probar.`,
-        );
-        const finPausaLarga = Date.now() + PAUSA_LARGA_MS;
-        let s = Math.ceil((finPausaLarga - Date.now()) / 1000);
-        while (s > 0) {
-          TweetsXer.updateInfo(
-            `Límite de peticiones alcanzado. Esperando ${s}s. ${TweetsXer.dCount} borrados.`,
+        if (!waitedByHeader) {
+          console.log(
+            `Se agotaron el intento y los ${MAX_RETRIES} reintentos. Pausando ${LONG_PAUSE_MS / 60000} minutos antes de volver a probar.`,
           );
-          await TweetsXer.sleep(1000);
-          s = Math.ceil((finPausaLarga - Date.now()) / 1000);
+          const longPauseEnd = Date.now() + LONG_PAUSE_MS;
+          let secondsLeft = Math.ceil((longPauseEnd - Date.now()) / 1000);
+          while (secondsLeft > 0) {
+            TweetsXer.updateInfo(
+              `Límite de peticiones alcanzado. Esperando ${secondsLeft}s. ${TweetsXer.dCount} borrados.`,
+            );
+            await TweetsXer.sleep(1000);
+            secondsLeft = Math.ceil((longPauseEnd - Date.now()) / 1000);
+          }
         }
       }
     },
@@ -388,7 +412,7 @@
     async deleteTweets() {
       while (this.tIds.length > 0) {
         this.tId = this.tIds.pop();
-        const body = `{"variables":{"tweet_id":"${this.tId}","dark_request":false},"queryId":"${this.queryIdBorrado}"}`;
+        const body = `{"variables":{"tweet_id":"${this.tId}","dark_request":false},"queryId":"${this.deleteQueryId}"}`;
         await this.sendRequestWithRetry(this.baseUrl + this.deleteURL, body);
       }
       this.tId = "";
@@ -401,7 +425,7 @@
       this.updateTitle("TweetXer: Borrando Favoritos");
       while (this.tIds.length > 0) {
         this.tId = this.tIds.pop();
-        const body = `{"variables":{"tweet_id":"${this.tId}","dark_request":false},"queryId":"${this.queryIdFavorito}"}`;
+        const body = `{"variables":{"tweet_id":"${this.tId}","dark_request":false},"queryId":"${this.unfavQueryId}"}`;
         await this.sendRequestWithRetry(this.baseUrl + this.unfavURL, body);
       }
       this.tId = "";
@@ -546,8 +570,8 @@
       await TweetsXer.sleep(2000);
 
       let unretweet, confirmURT, caret, menu, confirmation;
-      let erroresConsecutivos = 0;
-      const maxErroresConsecutivos = 5;
+      let consecutiveErrors = 0;
+      const maxConsecutiveErrors = 5;
       const more = '[data-testid="tweet"] [data-testid="caret"]';
 
       while (document.querySelectorAll(more).length > 0) {
@@ -590,17 +614,17 @@
 
           TweetsXer.dCount++;
           TweetsXer.updateProgressBar();
-          erroresConsecutivos = 0;
+          consecutiveErrors = 0;
           if (TweetsXer.dCount % 100 == 0)
             console.log(
               `${new Date().toUTCString()} Borrados ${TweetsXer.dCount} Tweets`,
             );
         } catch (error) {
           console.error(`Error al borrar el Tweet: ${error.message}`);
-          erroresConsecutivos++;
-          if (erroresConsecutivos >= maxErroresConsecutivos) {
+          consecutiveErrors++;
+          if (consecutiveErrors >= maxConsecutiveErrors) {
             console.log(
-              `${erroresConsecutivos} errores consecutivos. Se detiene.`,
+              `${consecutiveErrors} errores consecutivos. Se detiene.`,
             );
             break;
           }
@@ -642,7 +666,7 @@
       if (event) event.preventDefault();
       const el = document.getElementById("exportUpload");
       if (el) el.remove();
-      TweetsXer.enEjecucion = false;
+      TweetsXer.isRunning = false;
     },
   };
 
